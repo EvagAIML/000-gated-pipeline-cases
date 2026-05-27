@@ -1,0 +1,280 @@
+name: Build Notebooks
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+      REPO_PATH: ${{ github.repository }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Install build deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install nbconvert nbformat jupyter
+
+      - name: Install zip utility
+        run: sudo apt-get update && sudo apt-get install -y zip
+
+      - name: Sanitize notebooks (fix widgets metadata)
+        run: |
+          python - << 'PY'
+          import json
+          from pathlib import Path
+
+          for nb_path in Path("notebooks").rglob("*.ipynb"):
+              if "assets" in nb_path.parts:
+                  continue
+
+              try:
+                  data = json.loads(nb_path.read_text(encoding="utf-8"))
+              except Exception as e:
+                  print(f"[SKIP] Could not read JSON: {nb_path} ({e})")
+                  continue
+
+              md = data.get("metadata", {})
+              widgets = md.get("widgets")
+              changed = False
+              key = "application/vnd.jupyter.widget-state+json"
+
+              if isinstance(widgets, dict):
+                  if key in widgets and isinstance(widgets[key], dict) and "state" not in widgets[key]:
+                      md.pop("widgets", None)
+                      data["metadata"] = md
+                      changed = True
+                  elif key in widgets and not isinstance(widgets[key], dict):
+                      md.pop("widgets", None)
+                      data["metadata"] = md
+                      changed = True
+
+              if changed:
+                  nb_path.write_text(
+                      json.dumps(data, ensure_ascii=False, indent=1),
+                      encoding="utf-8"
+                  )
+                  print(f"[FIXED] Removed broken widgets metadata: {nb_path}")
+          PY
+
+      - name: Build site
+        run: |
+          set -euo pipefail
+
+          rm -rf site
+          mkdir -p site
+
+          find notebooks -name "*.ipynb" -not -path "*/assets/*" -print0 | while IFS= read -r -d '' nb; do
+            slug=$(dirname "$nb" | sed 's|^notebooks/||')
+            out_dir="site/$slug"
+            mkdir -p "$out_dir"
+
+            echo "[BUILD] $nb -> $out_dir"
+
+            jupyter nbconvert --to html "$nb" --output notebook.html --output-dir "$out_dir"
+            cp "$out_dir/notebook.html" "$out_dir/index.html"
+            cp "$nb" "$out_dir/notebook.ipynb"
+
+            py_file="${nb%.ipynb}.py"
+            if [ -f "$py_file" ]; then
+              cp "$py_file" "$out_dir/notebook.py"
+            fi
+
+            if [ -d "notebooks/$slug/assets" ]; then
+              cp -r "notebooks/$slug/assets" "$out_dir/"
+            fi
+
+            (
+              cd "$out_dir"
+              if [ -d assets ] && [ -f notebook.py ]; then
+                zip -r "${slug}.zip" notebook.html notebook.ipynb notebook.py assets >/dev/null
+              elif [ -d assets ]; then
+                zip -r "${slug}.zip" notebook.html notebook.ipynb assets >/dev/null
+              elif [ -f notebook.py ]; then
+                zip -r "${slug}.zip" notebook.html notebook.ipynb notebook.py >/dev/null
+              else
+                zip -r "${slug}.zip" notebook.html notebook.ipynb >/dev/null
+              fi
+            )
+          done
+
+          python - << 'PY'
+          import html
+          import os
+
+          base = os.environ["BASE_URL"]
+          repo = os.environ["REPO_PATH"]
+
+          slugs = sorted(
+              d for d in os.listdir("site")
+              if os.path.isdir(os.path.join("site", d))
+          )
+
+          cards = []
+          txt_lines = []
+
+          for slug in slugs:
+              view = f"{base}/{slug}/"
+              html_dl = f"{base}/{slug}/notebook.html"
+              ipynb_dl = f"{base}/{slug}/notebook.ipynb"
+              py_dl = f"{base}/{slug}/notebook.py"
+              zip_dl = f"{base}/{slug}/{slug}.zip"
+              colab = f"https://colab.research.google.com/github/{repo}/blob/main/notebooks/{slug}/{slug}.ipynb"
+              title = slug.replace("__", " | ").replace("-", " ").title()
+
+              txt_lines.append(slug)
+              txt_lines.append(f"VIEW: {view}")
+              txt_lines.append(f"COLAB: {colab}")
+              txt_lines.append(f"ZIP: {zip_dl}")
+              txt_lines.append(f"HTML: {html_dl}")
+              txt_lines.append(f"IPYNB: {ipynb_dl}")
+              txt_lines.append(f"PY: {py_dl}")
+              txt_lines.append("")
+
+              links = [
+                  f"<a href='{html.escape(view, quote=True)}'>View</a>",
+                  f"<a href='{html.escape(colab, quote=True)}'>Run in Colab</a>",
+                  f"<a href='{html.escape(zip_dl, quote=True)}'>Download Code</a>",
+                  f"<a href='{html.escape(html_dl, quote=True)}' download>Download HTML</a>",
+                  f"<a href='{html.escape(ipynb_dl, quote=True)}' download>Download .ipynb</a>",
+                  f"<a href='{html.escape(py_dl, quote=True)}' download>Download .py</a>",
+              ]
+
+              cards.append(
+                  "<div class='card'>"
+                  f"<div class='title'>{html.escape(title)}</div>"
+                  f"<div class='links'>{' '.join(links)}</div>"
+                  f"<div class='meta'>Slug: {html.escape(slug)}</div>"
+                  "</div>"
+              )
+
+          with open("site/urls.txt", "w", encoding="utf-8") as f:
+              f.write("\n".join(txt_lines))
+
+          index_html = f"""<!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>Gated Pipeline Cases</title>
+            <style>
+              :root {{
+                --bg: #0b1020;
+                --panel: #121935;
+                --text: #e8ecff;
+                --muted: #aab4e0;
+                --accent: #77a7ff;
+                --border: #273056;
+              }}
+              * {{ box-sizing: border-box; }}
+              body {{
+                margin: 0;
+                font-family: Arial, sans-serif;
+                background: var(--bg);
+                color: var(--text);
+              }}
+              .wrap {{
+                max-width: 1100px;
+                margin: 0 auto;
+                padding: 40px 20px 60px;
+              }}
+              h1 {{
+                margin: 0 0 10px;
+                font-size: 34px;
+              }}
+              p {{
+                color: var(--muted);
+                margin: 0 0 24px;
+              }}
+              .grid {{
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+                gap: 18px;
+              }}
+              .card {{
+                background: var(--panel);
+                border: 1px solid var(--border);
+                border-radius: 14px;
+                padding: 18px;
+              }}
+              .title {{
+                font-size: 18px;
+                font-weight: 700;
+                margin-bottom: 10px;
+              }}
+              .links {{
+                display: flex;
+                flex-wrap: wrap;
+                gap: 10px;
+                margin-bottom: 10px;
+              }}
+              a {{
+                color: var(--accent);
+                text-decoration: none;
+              }}
+              a:hover {{
+                text-decoration: underline;
+              }}
+              .meta {{
+                color: var(--muted);
+                font-size: 13px;
+              }}
+            </style>
+          </head>
+          <body>
+            <div class="wrap">
+              <h1>Gated Pipeline Cases</h1>
+              <p>Case studies of the Gated Pipeline ML lifecycle harness in action. View each notebook, run it in Colab, or download the artifacts.</p>
+              <div class="grid">
+                {''.join(cards) if cards else '<p>No notebooks found.</p>'}
+              </div>
+            </div>
+          </body>
+          </html>
+          """
+
+          with open("site/index.html", "w", encoding="utf-8") as f:
+              f.write(index_html)
+
+          open("site/.nojekyll", "w").close()
+          PY
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: ./site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
