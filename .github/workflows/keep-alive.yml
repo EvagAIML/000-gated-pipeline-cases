@@ -1,0 +1,13 @@
+name: Keep HF Spaces awake
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping backend
+        run: curl -fsSL -o /dev/null "https://evagaiml-retail-revenue-forecast-backend.hf.space/health" || echo "backend ping non-200 (may be cold-starting)"
+      - name: Ping frontend
+        run: curl -fsSL -o /dev/null "https://evagaiml-retail-revenue-forecast-frontend.hf.space" || echo "frontend ping non-200 (may be cold-starting)"

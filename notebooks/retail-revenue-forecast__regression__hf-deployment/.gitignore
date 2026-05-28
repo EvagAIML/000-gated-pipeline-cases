@@ -1,0 +1,5 @@
+*.joblib
+hf-backend/
+hf-frontend/
+.deps_installed_flag
+data_cache/
