@@ -8,6 +8,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping backend
-        run: curl -fsSL -o /dev/null "https://evagaiml-retail-revenue-forecast-backend.hf.space/health" || echo "backend ping non-200 (may be cold-starting)"
+        run: curl -fsSL -o /dev/null "https://evagaiml-hill-country-revenue-forecast-backend.hf.space" || echo "backend ping non-200 (may be cold-starting)"
       - name: Ping frontend
-        run: curl -fsSL -o /dev/null "https://evagaiml-retail-revenue-forecast-frontend.hf.space" || echo "frontend ping non-200 (may be cold-starting)"
+        run: curl -fsSL -o /dev/null "https://evagaiml-hill-country-revenue-forecast-frontend.hf.space" || echo "frontend ping non-200 (may be cold-starting)"

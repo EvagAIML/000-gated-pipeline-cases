@@ -4,3 +4,7 @@ __pycache__/
 *.pyc
 .DS_Store
 .ipynb_checkpoints/
+*.deps_installed_flag
+model.joblib
+training_sample.parquet
+*_executed.ipynb
