@@ -1,7 +1,7 @@
 {
   "leak-detection__regression__gated-harness": {
     "url": "https://raw.githubusercontent.com/EvagAIML/000-gated-pipeline-cases-data/main/leak-detection__regression__gated-harness__dataset__v1.zip",
-    "sha256": "838b5bb2029723dc89898851ba6d7fd66d3508e2352875b8f88f705fbcdcc486",
+    "sha256": "5774fa72986e9d6658f0f7528e45f1301f9c80e96b882ab0be8e82c5dcee58f2",
     "extract_to": "leak-detection__regression__gated-harness__dataset__v1"
   }
 }
